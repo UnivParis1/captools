@@ -69,14 +69,13 @@ def fetch_users(mails: list[str], research_units: pd.DataFrame) -> list[dict]:
     connexion = ldap.initialize(config['LDAP_URL'])
     users = []
     for mail in mails:
-        query = f"mail={mail}"
         ldap_user = connexion.search_s(PEOPLE_BRANCH,
                                        ldap.SCOPE_SUBTREE,
-                                       query)
+                                       f"mail={mail}")
         if len(ldap_user) == 0:
             print(f"Utilisateur {mail} non trouvé dans l'annuaire")
             continue
-        user = ldap_user[0][1] | {'unit_code': None, 'unit_title': None}
+        user = ldap_user[0][1] | {'unit_code': None, 'unit_title': None, 'unit_role': None}
         if user['eduPersonPrimaryAffiliation'][0] in [b'teacher', b'researcher']:
             for struct_identifier in user['supannEntiteAffectation']:
                 ldap_struct = connexion.search_s(STRUCTURE_BRANCH,
@@ -96,6 +95,11 @@ def fetch_users(mails: list[str], research_units: pd.DataFrame) -> list[dict]:
                     if (acronym and acronym in title) or (nom and nom in title):
                         user['unit_code'] = research_unit['Code RNSR']
                         user['unit_title'] = nom
+                    else:
+                        continue
+                    unit_role = user['supannRoleEntite'][0].decode()
+                    if struct_identifier.decode() in unit_role and 'S310' in unit_role:
+                        user['unit_role'] = "DU"
                 user['research_unit'] = ldap_struct[0][1]['description'][0].decode().split('-')[1]
         users.append(user)
     return users
@@ -111,6 +115,8 @@ def build_csv_row(user: dict, today_str: str) -> list[str]:
     """
     unit_code = user['unit_code'] or config['UNIV_UAI']
     unit_title = user['unit_title'] or ""
+    unit_role = user['unit_role'] or ""
+
     return [config['UNIV_UAI'],
             config['UNIV_NAME'],
             unit_code,
@@ -120,7 +126,7 @@ def build_csv_row(user: dict, today_str: str) -> list[str]:
             user['mail'][0].decode(),
             today_str,
             today_str,
-            "",
+            unit_role,
             "",
             "",
             "",
