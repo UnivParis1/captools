@@ -3,6 +3,7 @@ import csv
 import shutil
 import time
 from datetime import date
+import pandas as pd
 
 import ldap
 from dotenv import dotenv_values
@@ -10,6 +11,7 @@ from dotenv import dotenv_values
 ORIGINAL_CSV_FILE_PATH = 'data/CAPLAB_DCT_IPE_FichierPersonne_1.6.csv'
 
 PEOPLE_BRANCH = 'ou=people,dc=univ-paris1,dc=fr'
+STRUCTURE_BRANCH = 'ou=structures,o=Paris1,dc=univ-paris1,dc=fr'
 
 config = dotenv_values(".env")
 
@@ -56,7 +58,7 @@ def extract_field_names() -> list[str]:
     return list(map(lambda s: s.encode('latin1'), fieldnames))
 
 
-def fetch_users(mails: list[str]) -> list[dict]:
+def fetch_users(mails: list[str], research_units: pd.DataFrame) -> list[dict]:
     """
     Interroge le LDAP pour chaque email fourni en entrée
 
@@ -68,13 +70,34 @@ def fetch_users(mails: list[str]) -> list[dict]:
     users = []
     for mail in mails:
         query = f"mail={mail}"
-        ldap_response = connexion.search_s(PEOPLE_BRANCH,
-                                           ldap.SCOPE_SUBTREE,
-                                           query)
-        if len(ldap_response) == 0:
+        ldap_user = connexion.search_s(PEOPLE_BRANCH,
+                                       ldap.SCOPE_SUBTREE,
+                                       query)
+        if len(ldap_user) == 0:
             print(f"Utilisateur {mail} non trouvé dans l'annuaire")
             continue
-        users.append(ldap_response[0][1])
+        user = ldap_user[0][1] | {'unit_code': None, 'unit_title': None}
+        if user['eduPersonPrimaryAffiliation'][0] in [b'teacher', b'researcher']:
+            for struct_identifier in user['supannEntiteAffectation']:
+                ldap_struct = connexion.search_s(STRUCTURE_BRANCH,
+                                                 ldap.SCOPE_SUBTREE,
+                                                 f"ou={struct_identifier.decode()}")
+                cat = ldap_struct[0][1]['businessCategory']
+                if b'research' not in cat:
+                    continue
+                title = ldap_struct[0][1]['description'][0].decode().split('-')[1]
+                for _, research_unit in research_units.iterrows():
+                    acronym = research_unit['Acronyme']
+                    if pd.isna(acronym):
+                        acronym = None
+                    nom = research_unit['Nom de l\'unité']
+                    if pd.isna(nom):
+                        nom = None
+                    if (acronym and acronym in title) or (nom and nom in title):
+                        user['unit_code'] = research_unit['Code RNSR']
+                        user['unit_title'] = nom
+                user['research_unit'] = ldap_struct[0][1]['description'][0].decode().split('-')[1]
+        users.append(user)
     return users
 
 
@@ -86,10 +109,12 @@ def build_csv_row(user: dict, today_str: str) -> list[str]:
     :param today_str: date du jour, JJ/MM/AAAA, qui tient lieu de date d'arrivée fictive
     :return: liste de valeurs à insérer, dans l'ordre attendu
     """
+    unit_code = user['unit_code'] or config['UNIV_UAI']
+    unit_title = user['unit_title'] or ""
     return [config['UNIV_UAI'],
             config['UNIV_NAME'],
-            config['UNIV_UAI'],
-            "",
+            unit_code,
+            unit_title,
             user['sn'][0].decode(),
             user['givenName'][0].decode(),
             user['mail'][0].decode(),
@@ -149,8 +174,18 @@ def write_data(users: list[dict], output_file_name: str) -> None:
     print(f"Fichier généré {output_file_name}")
 
 
+def load_research_units() -> pd.DataFrame:
+    """
+    Load research units from Caplab CSV export
+
+    :return: Research unit table
+    """
+    return pd.read_csv("data/export_ur.csv", delimiter=";")
+
+
 def main(args):
-    users = fetch_users(args.users)
+    research_units = load_research_units()
+    users = fetch_users(args.users, research_units)
     output_file_name = create_output_file()
     write_data(users, output_file_name)
 
