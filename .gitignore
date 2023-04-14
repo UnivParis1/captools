@@ -1,0 +1,4 @@
+.env
+.idea
+data/*.csv
+!data/CAPLAB_DCT_IPE_FichierPersonne_1.6.csv
