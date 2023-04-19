@@ -1,5 +1,6 @@
 import argparse
 import csv
+import re
 import shutil
 import time
 from datetime import date
@@ -82,9 +83,10 @@ def fetch_users(mails: list[str], research_units: pd.DataFrame) -> list[dict]:
                                                  ldap.SCOPE_SUBTREE,
                                                  f"ou={struct_identifier.decode()}")
                 cat = ldap_struct[0][1]['businessCategory']
-                if b'research' not in cat:
+                if b'research' not in cat and b'pedagogy' not in cat:
                     continue
-                title = ldap_struct[0][1]['description'][0].decode().split('-')[1]
+                title = ldap_struct[0][1]['description'][0].decode().split(' - ')[1]
+                title = title.replace("\xa0", " ")
                 for _, research_unit in research_units.iterrows():
                     acronym = research_unit['Acronyme']
                     if pd.isna(acronym):
@@ -92,13 +94,22 @@ def fetch_users(mails: list[str], research_units: pd.DataFrame) -> list[dict]:
                     nom = research_unit['Nom de l\'unité']
                     if pd.isna(nom):
                         nom = None
-                    if (acronym and acronym in title) or (nom and nom in title):
+                    num = research_unit['Code interne de l\'unité']
+                    if pd.isna(num):
+                        num = None
+                    else:
+                        num = re.sub("[^0-9]", "", num)
+                    if (acronym and f"{acronym.upper()} :" in title.upper()) or (nom and nom.upper() in title.upper()) or (
+                            num and num in title):
                         user['unit_code'] = research_unit['Code RNSR']
-                        user['unit_title'] = nom
+                        user['unit_title'] = nom.replace('\u2019', "'")
                     else:
                         continue
+                    if 'supannRoleEntite' not in user:
+                        continue
                     unit_role = user['supannRoleEntite'][0].decode()
-                    if struct_identifier.decode() in unit_role and 'S310' in unit_role:
+                    if struct_identifier.decode() in unit_role and any(
+                            f"{{UAI:0751717J:HARPEGE.FCSTR}}{s}" in unit_role for s in ["529", "530", "532"]):
                         user['unit_role'] = "DU"
                 user['research_unit'] = ldap_struct[0][1]['description'][0].decode().split('-')[1]
         users.append(user)
@@ -173,7 +184,7 @@ def write_data(users: list[dict], output_file_name: str) -> None:
     fieldnames = extract_field_names()
     today_str = date.today().strftime("%d/%m/%Y")
     with open(output_file_name, 'a', newline='', encoding='iso-8859-1') as csvfile:
-        writer = csv.DictWriter(csvfile, fieldnames=fieldnames, delimiter=';')
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames, delimiter=';', quoting=csv.QUOTE_ALL)
         for user in users:
             values = build_csv_row(user, today_str)
             writer.writerow(dict(zip(fieldnames, values)))
