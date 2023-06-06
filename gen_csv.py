@@ -25,9 +25,9 @@ def parse_arguments() -> argparse.Namespace:
     """
     parser = argparse.ArgumentParser(
         description='Génère un CSV d\'import dans Caplab depuis un annuaire LDAP '
-                    'à partir de la liste des emails des comptes à ajouter.')
+                    'à partir de la liste des emails des comptes à ajouter ou d\'une catégorie d\'utilisateurs.')
     parser.add_argument('-u', '--users', nargs='+',
-                        help='Adresses mail des personnes à inclure dans le CSV, '
+                        help='Catégorie ou adresses mail des personnes à inclure dans le CSV, '
                              'séparées par des espaces',
                         required=True)
     parser.add_argument('-s', '--suffix', default=None,
@@ -103,7 +103,8 @@ def fetch_users(mails: list[str], research_units: pd.DataFrame) -> list[dict]:
                         num = None
                     else:
                         num = re.sub("[^0-9]", "", num)
-                    if (acronym and f"{acronym.upper()} :" in title.upper()) or (nom and nom.upper() in title.upper()) or (
+                    if (acronym and f"{acronym.upper()} :" in title.upper()) or (
+                            nom and nom.upper() in title.upper()) or (
                             num and num in title):
                         user['unit_code'] = research_unit['Code RNSR']
                         user['unit_title'] = nom.replace('\u2019', "'")
