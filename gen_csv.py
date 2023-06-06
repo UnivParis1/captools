@@ -143,7 +143,7 @@ def fetch_experts() -> list[dict]:
     return users
 
 
-def build_csv_row(user: dict, today_str: str) -> list[str]:
+def build_csv_row(user: dict, today_str: str, universities: pd.DataFrame) -> list[str]:
     """
     Construit la ligne de CSV depuis l'enregistrement utilisateur trouvé dans le LDAP
 
@@ -151,17 +151,39 @@ def build_csv_row(user: dict, today_str: str) -> list[str]:
     :param today_str: date du jour, JJ/MM/AAAA, qui tient lieu de date d'arrivée fictive
     :return: liste de valeurs à insérer, dans l'ordre attendu
     """
-    unit_code = user['unit_code'] or config['UNIV_UAI']
+    etab_uai = config['UNIV_UAI']
+    etab_name = config['UNIV_NAME']
+    if 'supannEtablissement' in user:
+        user_etab = user['supannEtablissement'][0].decode()
+        search = re.search(r"\{UAI\}(.+)", user_etab)
+        uai_found = len(search.groups())
+        while uai_found > 0:
+            uai = search.groups()[0]
+            if uai == etab_uai:
+                break
+            from_scanr = universities[universities['uai - identifiant'] == uai]
+            if len(from_scanr) == 0:
+                break
+            etab_name = from_scanr.iloc[0]['Libellé']
+            etab_uai = uai
+            uai_found = 0
+
+    unit_code = user['unit_code'] or etab_uai
     unit_title = user['unit_title'] or ""
     unit_role = user['unit_role'] or ""
 
-    return [config['UNIV_UAI'],
-            config['UNIV_NAME'],
+    user_mail = None
+    if 'mail' in user and len(user['mail']) > 0:
+        user_mail = user['mail'][0].decode()
+    if 'supannMailPerso' in user and len(user['supannMailPerso']) > 0:
+        user_mail = user['supannMailPerso'][0].decode()
+    return [etab_uai,
+            etab_name,
             unit_code,
             unit_title,
             user['sn'][0].decode(),
             user['givenName'][0].decode(),
-            user['mail'][0].decode(),
+            user_mail,
             today_str,
             today_str,
             unit_role,
@@ -201,7 +223,7 @@ def build_csv_row(user: dict, today_str: str) -> list[str]:
             ]
 
 
-def write_data(users: list[dict], output_file_name: str) -> None:
+def write_data(users: list[dict], output_file_name: str, universities: pd.DataFrame) -> None:
     """
     Writes LDAP data to output CSV file
 
@@ -213,7 +235,7 @@ def write_data(users: list[dict], output_file_name: str) -> None:
     with open(output_file_name, 'a', newline='', encoding='iso-8859-1') as csvfile:
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames, delimiter=';', quoting=csv.QUOTE_ALL)
         for user in users:
-            values = build_csv_row(user, today_str)
+            values = build_csv_row(user, today_str, universities)
             writer.writerow(dict(zip(fieldnames, values)))
     print(f"Fichier généré {output_file_name}")
 
@@ -227,14 +249,24 @@ def load_research_units() -> pd.DataFrame:
     return pd.read_csv("data/export_ur.csv", delimiter=";")
 
 
+def load_universities() -> pd.DataFrame:
+    """
+    Load research units from Caplab CSV export
+
+    :return: Research unit table
+    """
+    return pd.read_csv("data/fr-esr-principaux-etablissements-enseignement-superieur.csv", delimiter=";")
+
+
 def main(args):
+    universities = load_universities()
     if len(args.users) == 1 and args.users[0] == "experts":
         users = fetch_experts()
     else:
         research_units = load_research_units()
         users = fetch_users(args.users, research_units)
     output_file_name = create_output_file(suffix=args.suffix)
-    write_data(users, output_file_name)
+    write_data(users, output_file_name, universities=universities)
 
 
 if __name__ == '__main__':
