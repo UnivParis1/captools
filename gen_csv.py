@@ -30,16 +30,20 @@ def parse_arguments() -> argparse.Namespace:
                         help='Adresses mail des personnes à inclure dans le CSV, '
                              'séparées par des espaces',
                         required=True)
+    parser.add_argument('-s', '--suffix', default=None,
+                        help='Suffixe à ajouter au nom de fichier',
+                        required=True)
     return parser.parse_args()
 
 
-def create_output_file() -> str:
+def create_output_file(suffix: str = None) -> str:
     """
     Génère un nom de fichier de sortie avec timestamp
 
+    :param suffix: str Suffixe à ajouter au nom de fichier
     :return: le chemin du fichier de sortie
     """
-    output = f"data/import_caplab_{time.strftime('%Y%m%d%H%M%S')}.csv"
+    output = f"data/import_caplab_{suffix or time.strftime('%Y%m%d%H%M%S')}.csv"
     shutil.copyfile(ORIGINAL_CSV_FILE_PATH, output)
     return output
 
@@ -113,6 +117,28 @@ def fetch_users(mails: list[str], research_units: pd.DataFrame) -> list[dict]:
                         user['unit_role'] = "DU"
                 user['research_unit'] = ldap_struct[0][1]['description'][0].decode().split('-')[1]
         users.append(user)
+    return users
+
+
+def fetch_experts() -> list[dict]:
+    """
+    Interroge le LDAP pour les experts Caplab
+
+    :param mails: liste des adresses email
+    :return: liste des enregistrements LDAP trouvés
+    """
+
+    connexion = ldap.initialize(config['LDAP_URL'])
+    connexion.set_option(ldap.OPT_REFERRALS, 0)
+    connexion.simple_bind_s(config['LDAP_DN'], config['LDAP_PASSWD'])
+    ldap_users = connexion.search_s(PEOPLE_BRANCH,
+                                    ldap.SCOPE_SUBTREE,
+                                    '(&(objectClass=supannPerson)(eduPersonEntitlement=https://entitlement.p1ps.fr/application=caplab/eval-aapi))')
+    if len(ldap_users) == 0:
+        print("Aucun utilisateur expert trouvé dans l'annuaire")
+        return []
+    users = [ldap_user[1] | {'unit_code': None, 'unit_title': None, 'unit_role': None} for ldap_user in
+             ldap_users]
     return users
 
 
@@ -201,9 +227,12 @@ def load_research_units() -> pd.DataFrame:
 
 
 def main(args):
-    research_units = load_research_units()
-    users = fetch_users(args.users, research_units)
-    output_file_name = create_output_file()
+    if len(args.users) == 1 and args.users[0] == "experts":
+        users = fetch_experts()
+    else:
+        research_units = load_research_units()
+        users = fetch_users(args.users, research_units)
+    output_file_name = create_output_file(suffix=args.suffix)
     write_data(users, output_file_name)
 
 
