@@ -9,7 +9,7 @@ import pandas as pd
 import ldap
 from dotenv import dotenv_values
 
-ORIGINAL_CSV_FILE_PATH = 'data/CAPLAB_DCT_IPE_FichierPersonne_1.6.csv'
+ORIGINAL_CSV_FILE_PATH = 'data/CAPLAB_DCT_IPE_FichierPersonne_2.0.csv'
 
 PEOPLE_BRANCH = 'ou=people,dc=univ-paris1,dc=fr'
 STRUCTURE_BRANCH = 'ou=structures,o=Paris1,dc=univ-paris1,dc=fr'
@@ -187,7 +187,6 @@ def build_csv_row(user: dict, today_str: str, universities: pd.DataFrame) -> lis
             today_str,
             today_str,
             unit_role,
-            "",
             "",
             "",
             "",
